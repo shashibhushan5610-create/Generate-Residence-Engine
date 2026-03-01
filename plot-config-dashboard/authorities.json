@@ -1,0 +1,86 @@
+{
+  "authorities": {
+    "PDA": {
+      "name": "Prayagraj Development Authority",
+      "rules": {
+        "Residential": {
+          "maxFAR": 1.5,
+          "maxGroundCoverage": 60,
+          "maxHeight": 12.5,
+          "setbacks": {
+            "front": { "min": 3.0, "roadWidthThresholds": [ { "minRoad": 9, "setback": 3.0 }, { "minRoad": 12, "setback": 4.5 } ] },
+            "rear": { "min": 2.0 },
+            "side1": { "min": 1.5 },
+            "side2": { "min": 1.5 }
+          },
+          "parkingRequirementPer100Sqm": 1
+        },
+        "Commercial": {
+          "maxFAR": 2.0,
+          "maxGroundCoverage": 50,
+          "maxHeight": 15.0,
+          "setbacks": {
+            "front": { "min": 4.5 },
+            "rear": { "min": 3.0 },
+            "side1": { "min": 3.0 },
+            "side2": { "min": 3.0 }
+          },
+          "parkingRequirementPer100Sqm": 2
+        },
+        "Mixed Use": {
+          "maxFAR": 1.75,
+          "maxGroundCoverage": 55,
+          "maxHeight": 15.0,
+          "setbacks": {
+            "front": { "min": 4.5 },
+            "rear": { "min": 3.0 },
+            "side1": { "min": 2.0 },
+            "side2": { "min": 2.0 }
+          },
+          "parkingRequirementPer100Sqm": 1.5
+        }
+      }
+    },
+    "LDA": {
+      "name": "Lucknow Development Authority",
+      "rules": {
+        "Residential": {
+          "maxFAR": 1.75,
+          "maxGroundCoverage": 65,
+          "maxHeight": 15.0,
+          "setbacks": {
+            "front": { "min": 3.0 },
+            "rear": { "min": 2.0 },
+            "side1": { "min": 1.2 },
+            "side2": { "min": 1.2 }
+          },
+          "parkingRequirementPer100Sqm": 1
+        },
+        "Commercial": {
+          "maxFAR": 2.5,
+          "maxGroundCoverage": 40,
+          "maxHeight": 24.0,
+          "setbacks": {
+            "front": { "min": 6.0 },
+            "rear": { "min": 4.5 },
+            "side1": { "min": 4.5 },
+            "side2": { "min": 4.5 }
+          },
+          "parkingRequirementPer100Sqm": 3
+        },
+        "Mixed Use": {
+          "maxFAR": 2.0,
+          "maxGroundCoverage": 50,
+          "maxHeight": 18.0,
+          "setbacks": {
+            "front": { "min": 5.0 },
+            "rear": { "min": 3.0 },
+            "side1": { "min": 3.0 },
+            "side2": { "min": 3.0 }
+          },
+          "parkingRequirementPer100Sqm": 2
+        }
+      }
+    }
+  }
+}
