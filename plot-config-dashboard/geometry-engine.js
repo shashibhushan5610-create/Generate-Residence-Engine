@@ -92,21 +92,24 @@ window.GeometryEngine = (function () {
         // Triangle [k]: V0, V[k+1], V[k+2] (Sides: D[k-1], S[k+1], D[k])
         // For the very last vertex, the distance to V0 is the last side length.
         for (let k = 1; k < sides.length - 2; k++) {
-            const prevDiag = diagonals[k - 1];
-            const currSide = sides[k + 1];
+            const prevDiag = diagonals[k - 1]; // V0 -> V[k+1]
+            const currSide = sides[k + 1]; // V[k+1] -> V[k+2]
 
-            // If it's the last triangle, the third side is the last side of the polygon
+            // If it's the last triangle, the third side is the last side of the polygon (V[k+2] -> V0)
             const isLast = (k === sides.length - 3);
-            const currDiag = isLast ? sides[sides.length - 1] : (diagonals[k] || 0);
+            const currDiag = isLast ? sides[sides.length - 1] : (diagonals[k] || 0); // V0 -> V[k+2]
 
-            const alpha = solveAngle(prevDiag, currSide, currDiag);
+            // Solve for angle at V0 in triangle (V0, V[k+1], V[k+2])
+            // Sides adjacent to V0: prevDiag (a) and currDiag (b)
+            // Side opposite to V0: currSide (c)
+            const angleAtV0 = solveAngle(prevDiag, currDiag, currSide);
 
-            // Base triangle angle (V0) relative to X axis
-            const baseAngle = Math.atan2(vertices[k + 1].y, vertices[k + 1].x);
+            // Base angle is direction from V0 to V[k+1]
+            const baseAngle = Math.atan2(vertices[k + 1].y - vertices[0].y, vertices[k + 1].x - vertices[0].x);
 
             vertices[k + 2] = {
-                x: vertices[0].x + currDiag * Math.cos(baseAngle + alpha),
-                y: vertices[0].y + currDiag * Math.sin(baseAngle + alpha)
+                x: vertices[0].x + currDiag * Math.cos(baseAngle + angleAtV0),
+                y: vertices[0].y + currDiag * Math.sin(baseAngle + angleAtV0)
             };
         }
 

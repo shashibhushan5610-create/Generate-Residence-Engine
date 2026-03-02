@@ -112,13 +112,16 @@ const state = {
     developmentType: 'plotted_single',
     proposedHeight: 12.5,
     isCornerPlot: false,
+    farReport: null,
     totalUnits: 1,
     manualOverride: false,
     overrides: {
         frontSetback: null,
         maxFAR: null
     },
-    showDimensions: true
+    showDimensions: true,
+    serverEnvelope: null,
+    serverValidation: null
 };
 
 // --- DOM Elements ---
@@ -163,10 +166,12 @@ function init() {
             const selectAuth = document.getElementById('select-authority');
             if (authData && selectAuth) {
                 Object.keys(authData).forEach(key => {
-                    const opt = document.createElement('option');
-                    opt.value = key;
-                    opt.textContent = authData[key].name;
-                    selectAuth.appendChild(opt);
+                    if (key === 'UP_2025') {
+                        const opt = document.createElement('option');
+                        opt.value = key;
+                        opt.textContent = authData[key].name;
+                        selectAuth.appendChild(opt);
+                    }
                 });
                 // Default to 2025 Bye-laws
                 state.authorityId = 'UP_2025';
@@ -355,6 +360,137 @@ function updateAll(partial = false) {
     }
 
     drawCanvas();
+    fetchBackendEnvelope();
+}
+
+/**
+ * Fetches the definitive geometric envelope from the Python Microservice.
+ */
+async function fetchBackendEnvelope() {
+    if (!state.geometry.isClosed || state.geometry.isSelfIntersecting) {
+        state.serverEnvelope = null;
+        state.serverValidation = null;
+        return;
+    }
+
+    const frontEdges = state.roads.map(r => r.sideIndex);
+    if (frontEdges.length === 0) frontEdges.push(0);
+
+    let bType = state.landUse;
+    if (bType === "Residential") bType = "Residential Plotted"; // Match Python expected string
+
+    const reqData = {
+        plot_coordinates: state.geometry.vertices.map(v => [v.x, v.y]),
+        front_edge_indices: frontEdges,
+        plot_area_sqm: state.geometry.area || 0,
+        building_height_m: parseFloat(state.proposedHeight) || 12.5,
+        building_type: bType,
+        zone_type: state.authorityId === 'UP_2025' ? 'Standard' : 'Standard',
+        proposed_road_widths_m: {},
+        existing_road_widths_m: {},
+        is_corner_plot: state.isCornerPlot,
+        is_old_approved_layout: false,
+        ground_coverage_sqm: 0.0,
+        proposed_elements: [],
+        open_space_area: state.geometry.area || 0
+    };
+
+    state.roads.forEach(r => {
+        reqData.proposed_road_widths_m[r.sideIndex] = parseFloat(r.proposedWidth) || parseFloat(r.width) || 0;
+        reqData.existing_road_widths_m[r.sideIndex] = parseFloat(r.width) || 0;
+    });
+
+    try {
+        const res = await fetch('http://127.0.0.1:8000/api/v1/generate-envelope', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqData)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'success' && data.buildable_envelope_coords.length > 2) {
+                state.serverEnvelope = data.buildable_envelope_coords.map(c => ({ x: c[0], y: c[1] }));
+                state.serverValidation = data.exception_validation || null;
+
+                // Override local compliance setbacks with server definitive ones
+                if (!state.compliance) state.compliance = {};
+                state.compliance.setbacks = data.setbacks_applied;
+
+                // Only redraw if we got valid server coordinates to prevent infinite loops
+                drawCanvas();
+            } else {
+                state.serverEnvelope = null;
+            }
+        }
+    } catch (err) {
+        console.warn("Backend API not reachable. Using local JS approximations.", err);
+    }
+
+    // Also fetch FAR report
+    fetchFARReport();
+}
+
+/**
+ * Fetches the FAR compliance report from the Python FAR Rule Engine.
+ */
+async function fetchFARReport() {
+    if (!state.geometry.isClosed || state.geometry.isSelfIntersecting) {
+        state.farReport = null;
+        return;
+    }
+
+    const plotArea = state.geometry.area || 0;
+    let wideningArea = 0;
+    let maxRoadWidth = 0;
+    state.roads.forEach(r => {
+        const v1 = state.geometry.vertices[r.sideIndex];
+        const v2 = state.geometry.vertices[(r.sideIndex + 1) % state.geometry.vertices.length];
+        if (v1 && v2) {
+            const edgeLen = Math.sqrt((v2.x - v1.x) ** 2 + (v2.y - v1.y) ** 2);
+            const ww = Math.max(0, (parseFloat(r.proposedWidth) || 0) - (parseFloat(r.width) || 0)) / 2;
+            wideningArea += edgeLen * ww;
+        }
+        const pw = parseFloat(r.proposedWidth) || parseFloat(r.width) || 0;
+        if (pw > maxRoadWidth) maxRoadWidth = pw;
+    });
+
+    let bType = state.landUse;
+    if (bType === 'Residential') bType = 'residential_plotted';
+    else if (bType === 'Commercial') bType = 'commercial';
+    else if (bType === 'Group Housing') bType = 'group_housing';
+    else if (bType === 'Industrial') bType = 'industrial';
+    else bType = 'residential_plotted';
+
+    const reqData = {
+        plot_area: plotArea,
+        net_plot_area: plotArea - wideningArea,
+        road_width: maxRoadWidth || 9.0,
+        building_type: bType,
+        zone_type: 'built_up',
+        is_tod_zone: false,
+        surrendered_area_for_road: wideningArea,
+        green_building_rating: 'none',
+        circle_rate: 0,
+        proposed_extra_far_area: 0,
+        spatial_elements: [],
+    };
+
+    try {
+        const res = await fetch('http://127.0.0.1:8000/api/v1/calculate-far', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqData)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'success') {
+                state.farReport = data.far_report;
+                drawCanvas();
+            }
+        }
+    } catch (err) {
+        console.warn("FAR API not reachable.", err);
+    }
 }
 
 function updateHUD() {
@@ -615,6 +751,122 @@ function drawDimension(ctx, p1, p2, text, options = {}, toScr) {
     ctx.restore();
 }
 
+/**
+ * Renders an architectural Area Chart Table on the canvas.
+ */
+function drawAreaChart(ctx, isDark) {
+    const x = 30;
+    const y = canvas.height - 380;
+    const rowHeight = 24;
+    const col1Width = 40;
+    const col2Width = 260;
+    const col3Width = 100;
+    const totalWidth = col1Width + col2Width + col3Width;
+
+    // Calculate dynamic values from state
+    const plotArea = state.geometry.area || 0;
+    let wideningArea = 0;
+    state.roads.forEach(r => {
+        const side = state.geometry.vertices.length;
+        const v1 = state.geometry.vertices[r.sideIndex];
+        const v2 = state.geometry.vertices[(r.sideIndex + 1) % side];
+        if (v1 && v2) {
+            const edgeLen = Math.sqrt((v2.x - v1.x) ** 2 + (v2.y - v1.y) ** 2);
+            const wWidth = Math.max(0, (parseFloat(r.proposedWidth) || 0) - (parseFloat(r.width) || 0)) / 2;
+            wideningArea += edgeLen * wWidth;
+        }
+    });
+
+    const netArea = plotArea - wideningArea;
+
+    // Get buildable vertices to calculate ground coverage
+    const setbacksArr = new Array(state.geometry.vertices.length).fill(0);
+    const fIdx = state.roads.length > 0 ? state.roads[0].sideIndex : 0;
+    const cS = state.compliance?.setbacks || {};
+    setbacksArr[fIdx] = cS.front || 0;
+    setbacksArr[(fIdx + 1) % setbacksArr.length] = cS.side1 || 0;
+    if (setbacksArr.length >= 4) {
+        setbacksArr[(fIdx + 2) % setbacksArr.length] = cS.rear || 0;
+        setbacksArr[(fIdx + 3) % setbacksArr.length] = cS.side2 || 0;
+    }
+    const offsets = state.geometry.vertices.map((v, i) => {
+        const road = state.roads.find(r => r.sideIndex === i);
+        const sw = road ? (Math.max(0, (parseFloat(road.proposedWidth) || 0) - (parseFloat(road.width) || 0)) / 2) : 0;
+        return sw + setbacksArr[i];
+    });
+    const buildable = state.serverEnvelope || (window.GeometryEngine ? window.GeometryEngine.calculateInsetPolygon(state.geometry.vertices, offsets) : []);
+    const coverageArea = (window.GeometryEngine && buildable.length > 2) ? window.GeometryEngine.calculateArea(buildable) : 0;
+
+    // Use FAR report from server if available, else fallback
+    const fr = state.farReport;
+    const baseFarArea = fr ? fr.base_far.area : netArea * 1.75;
+    const mfarArea = fr ? fr.max_permissible_far.final_mfar_area : netArea * 2.50;
+    const compFar = fr ? fr.incentives.compensatory_far_area : 0;
+    const greenBonus = fr ? fr.incentives.green_bonus_area : 0;
+    const baseFarRatio = fr ? fr.base_far.ratio : 1.75;
+
+    const rows = [
+        ['S.No', 'PARTICULARS', 'AREA SQ.MT.'],
+        ['1', 'TOTAL AREA OF PLOT', plotArea.toFixed(2)],
+        ['2', 'ROAD WIDENING AREA', wideningArea.toFixed(2)],
+        ['3', 'NET PLOT AREA', netArea.toFixed(2)],
+        ['4', `PERMISSIBLE FAR @ ${baseFarRatio.toFixed(2)}`, baseFarArea.toFixed(2)],
+        ['5', 'MAX FAR (MFAR) AREA', (mfarArea === Infinity ? 'UR' : mfarArea.toFixed(2))],
+        ['6', 'COMPENSATORY FAR', compFar.toFixed(2)],
+        ['7', 'GREEN BONUS FAR', greenBonus.toFixed(2)],
+        ['8', 'COVERED AREA (GF)', coverageArea.toFixed(2)],
+        ['9', 'COVERED AREA (1ST FL)', coverageArea.toFixed(2)],
+        ['10', 'COVERED AREA (2ND FL)', (coverageArea * 0.9).toFixed(2)],
+        ['11', 'COVERED AREA (3RD FL)', (coverageArea * 0.9).toFixed(2)],
+    ];
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Title Block
+    ctx.fillStyle = isDark ? '#1e293b' : '#f8fafc';
+    ctx.fillRect(0, -36, totalWidth, 36);
+    ctx.strokeStyle = isDark ? '#475569' : '#000';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(0, -36, totalWidth, 36);
+
+    ctx.fillStyle = isDark ? '#fff' : '#000';
+    ctx.font = 'bold 15px Inter';
+    ctx.textAlign = 'left';
+    ctx.fillText("AREA CHART:-", 12, -12);
+
+    // Data Rows
+    ctx.font = '500 11px Inter';
+    rows.forEach((row, i) => {
+        const ry = i * rowHeight;
+
+        // Header styling
+        if (i === 0) {
+            ctx.fillStyle = isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9';
+            ctx.fillRect(0, ry, totalWidth, rowHeight);
+        }
+
+        // Draw Cells
+        ctx.strokeStyle = isDark ? 'rgba(71, 85, 105, 0.8)' : '#000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0, ry, col1Width, rowHeight);
+        ctx.strokeRect(col1Width, ry, col2Width, rowHeight);
+        ctx.strokeRect(col1Width + col2Width, ry, col3Width, rowHeight);
+
+        // Text
+        ctx.fillStyle = isDark ? '#cbd5e1' : '#000';
+        ctx.textAlign = 'center';
+        ctx.fillText(row[0], col1Width / 2, ry + 16);
+        ctx.textAlign = 'left';
+        ctx.fillText(row[1], col1Width + 10, ry + 16);
+        ctx.textAlign = 'right';
+        ctx.font = (i === 0) ? 'bold 11px Inter' : '500 11px Inter';
+        ctx.fillText(row[2], totalWidth - 10, ry + 16);
+    });
+
+    ctx.restore();
+}
+
 
 // --- Canvas Drawing ---
 function drawCanvas() {
@@ -669,7 +921,17 @@ function drawCanvas() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // 1. Road Width Visualization & Dimensions
+    // 1. Road Width Visualization — Clipped to plot polygon
+    // Build plot clip path
+    const plotClipPath = new Path2D();
+    const cp0 = toScr(state.geometry.vertices[0].x, state.geometry.vertices[0].y);
+    plotClipPath.moveTo(cp0.x, cp0.y);
+    for (let ci = 1; ci < state.geometry.vertices.length; ci++) {
+        const cpt = toScr(state.geometry.vertices[ci].x, state.geometry.vertices[ci].y);
+        plotClipPath.lineTo(cpt.x, cpt.y);
+    }
+    plotClipPath.closePath();
+
     state.roads.forEach(road => {
         if (parseFloat(road.proposedWidth) > 0) {
             const v1 = state.geometry.vertices[road.sideIndex];
@@ -688,7 +950,7 @@ function drawCanvas() {
             const prW = parseFloat(road.proposedWidth) || exW;
             const sideWidening = (prW - exW) > 0 ? (prW - exW) / 2 : 0;
 
-            // Existing & Widening Shading
+            // Existing Road Shading (outside plot — no clip needed)
             const eFar1 = toScr(v1.x + out_nx * exW, v1.y + out_ny * exW);
             const eFar2 = toScr(v2.x + out_nx * exW, v2.y + out_ny * exW);
             ctx.fillStyle = 'rgba(34, 197, 94, 0.15)';
@@ -696,15 +958,32 @@ function drawCanvas() {
             ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.lineTo(eFar2.x, eFar2.y); ctx.lineTo(eFar1.x, eFar1.y);
             ctx.fill();
 
+            // Road Widening Hatch — Clipped inside plot polygon only
             if (sideWidening > 0) {
+                ctx.save();
+                ctx.clip(plotClipPath);
                 const wIn1 = toScr(v1.x + in_nx * sideWidening, v1.y + in_ny * sideWidening);
                 const wIn2 = toScr(v2.x + in_nx * sideWidening, v2.y + in_ny * sideWidening);
                 ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
                 ctx.beginPath();
                 ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.lineTo(wIn2.x, wIn2.y); ctx.lineTo(wIn1.x, wIn1.y);
                 ctx.fill();
+                // Cross-hatch lines for widening
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.35)';
+                ctx.lineWidth = 0.8;
+                const edgeAngle = Math.atan2(s2.y - s1.y, s2.x - s1.x);
+                const hatchSpacing = 8;
+                const hatchLen = Math.sqrt((wIn2.x - s2.x) ** 2 + (wIn2.y - s2.y) ** 2) + Math.sqrt((s2.x - s1.x) ** 2 + (s2.y - s1.y) ** 2);
+                for (let ht = -hatchLen; ht < hatchLen * 2; ht += hatchSpacing) {
+                    const hx = s1.x + Math.cos(edgeAngle) * ht;
+                    const hy = s1.y + Math.sin(edgeAngle) * ht;
+                    ctx.beginPath();
+                    ctx.moveTo(hx, hy);
+                    ctx.lineTo(hx + (wIn1.x - s1.x) * 1.5, hy + (wIn1.y - s1.y) * 1.5);
+                    ctx.stroke();
+                }
+                ctx.restore();
             }
-
         }
     });
 
@@ -721,24 +1000,36 @@ function drawCanvas() {
     ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    // 2. Smart Dimensions
+    // 2. Smart Dimensions — Show ALL sides for irregular plots
     if (state.showDimensions) {
         const frontIdx = state.roads.length > 0 ? state.roads[0].sideIndex : 0;
-
-        // Use the embedded SmartDimensionEngine for guaranteed availability
         const engine = SmartDimensionEngine;
+        const verts = state.geometry.vertices;
 
-        const plotDims = engine.getPlotDimensions(state.geometry.vertices, frontIdx);
-        plotDims.forEach(d => {
-            drawDimension(ctx, d.p1, d.p2, d.label, {
-                offset: 35,
-                color: isDark ? '#60a5fa' : '#2563eb'
-            }, toScr);
-        });
+        if (state.type === 'irregular') {
+            // Show every single side dimension for irregular plots
+            for (let si = 0; si < verts.length; si++) {
+                const p1 = verts[si];
+                const p2 = verts[(si + 1) % verts.length];
+                const edgeLen = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+                drawDimension(ctx, p1, p2, `${edgeLen.toFixed(2)} M`, {
+                    offset: 35,
+                    color: isDark ? '#60a5fa' : '#2563eb'
+                }, toScr);
+            }
+        } else {
+            const plotDims = engine.getPlotDimensions(verts, frontIdx);
+            plotDims.forEach(d => {
+                drawDimension(ctx, d.p1, d.p2, d.label, {
+                    offset: 35,
+                    color: isDark ? '#60a5fa' : '#2563eb'
+                }, toScr);
+            });
+        }
 
         if (state.geometry.isClosed && !state.geometry.isSelfIntersecting && state.compliance) {
             const compDims = engine.getComplianceDimensions(
-                state.geometry.vertices,
+                verts,
                 state.compliance.setbacks,
                 state.roads
             );
@@ -754,7 +1045,7 @@ function drawCanvas() {
     }
 
 
-    // 3. Compliance & Buildable Area
+    // 3. Compliance & Buildable Area with Setback Hatching
     if (state.geometry.isClosed && !state.geometry.isSelfIntersecting && state.compliance && state.compliance.setbacks) {
         const nSides = state.geometry.vertices.length;
         const setbacksArr = new Array(nSides).fill(0);
@@ -773,10 +1064,79 @@ function drawCanvas() {
             return sideW + setbacksArr[i];
         });
 
-        const buildableVertices = window.GeometryEngine.calculateInsetPolygon(state.geometry.vertices, effectiveOffsets);
+        // Use definitive Server Envelope if running, otherwise fallback to local basic approximation
+        const buildableVertices = state.serverEnvelope || window.GeometryEngine.calculateInsetPolygon(state.geometry.vertices, effectiveOffsets);
         const buildableArea = window.GeometryEngine.calculateArea(buildableVertices);
 
         if (buildableVertices.length > 2) {
+            // --- Setback Hatching ---
+            // Draw hatched area between plot outline and buildable envelope
+            ctx.save();
+            // Create a path that is the plot outline minus the buildable area (the setback band)
+            ctx.beginPath();
+            // Outer path (plot) — clockwise
+            const pv0 = toScr(state.geometry.vertices[0].x, state.geometry.vertices[0].y);
+            ctx.moveTo(pv0.x, pv0.y);
+            for (let pi = 1; pi < state.geometry.vertices.length; pi++) {
+                const pvt = toScr(state.geometry.vertices[pi].x, state.geometry.vertices[pi].y);
+                ctx.lineTo(pvt.x, pvt.y);
+            }
+            ctx.closePath();
+            // Inner path (buildable) — counter-clockwise to cut out
+            const bv0 = toScr(buildableVertices[buildableVertices.length - 1].x, buildableVertices[buildableVertices.length - 1].y);
+            ctx.moveTo(bv0.x, bv0.y);
+            for (let bi = buildableVertices.length - 2; bi >= 0; bi--) {
+                const bvt = toScr(buildableVertices[bi].x, buildableVertices[bi].y);
+                ctx.lineTo(bvt.x, bvt.y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(234, 179, 8, 0.08)';
+            ctx.fill();
+            // Diagonal hatch lines in the setback band
+            ctx.clip();
+            ctx.strokeStyle = 'rgba(234, 179, 8, 0.3)';
+            ctx.lineWidth = 0.6;
+            const hatchStep = 10;
+            for (let hl = -h; hl < w + h; hl += hatchStep) {
+                ctx.beginPath();
+                ctx.moveTo(hl, 0);
+                ctx.lineTo(hl + h, h);
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // --- Setback dimension labels on each edge ---
+            const verts = state.geometry.vertices;
+            for (let si = 0; si < nSides; si++) {
+                const sbVal = setbacksArr[si];
+                if (sbVal <= 0) continue;
+                const ev1 = verts[si];
+                const ev2 = verts[(si + 1) % nSides];
+                const emx = (ev1.x + ev2.x) / 2;
+                const emy = (ev1.y + ev2.y) / 2;
+                const edx = ev2.x - ev1.x, edy = ev2.y - ev1.y;
+                const elen = Math.sqrt(edx * edx + edy * edy);
+                const enx = -edy / elen, eny = edx / elen;
+                // Place text at setback midpoint
+                const road = state.roads.find(r => r.sideIndex === si);
+                const sideW = road ? (Math.max(0, (parseFloat(road.proposedWidth) || 0) - (parseFloat(road.width) || 0)) / 2) : 0;
+                const textDist = sideW + sbVal / 2;
+                const labelPt = toScr(emx + enx * textDist, emy + eny * textDist);
+                ctx.save();
+                ctx.fillStyle = '#eab308';
+                ctx.font = 'bold 10px Inter';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const textAngle = Math.atan2(-(ev2.y - ev1.y) * scale, (ev2.x - ev1.x) * scale);
+                let ta = textAngle;
+                if (ta > Math.PI / 2 || ta < -Math.PI / 2) ta += Math.PI;
+                ctx.translate(labelPt.x, labelPt.y);
+                ctx.rotate(ta);
+                ctx.fillText(`Setback ${sbVal.toFixed(1)}m`, 0, 0);
+                ctx.restore();
+            }
+
+            // --- Buildable Envelope Outline ---
             ctx.beginPath();
             const startPt = toScr(buildableVertices[0].x, buildableVertices[0].y);
             ctx.moveTo(startPt.x, startPt.y);
@@ -791,43 +1151,52 @@ function drawCanvas() {
             ctx.fillStyle = 'rgba(234, 179, 8, 0.15)';
             ctx.fill();
 
-            // Buildable Area Dimensions & Label
+            // Buildable Area Label
             let cx = 0, cy = 0;
-            buildableVertices.forEach((v1, i) => {
-                cx += v1.x; cy += v1.y;
-            });
-
+            buildableVertices.forEach(v1 => { cx += v1.x; cy += v1.y; });
             const centerScr = toScr(cx / buildableVertices.length, cy / buildableVertices.length);
             ctx.fillStyle = '#eab308'; ctx.font = 'bold 12px Inter'; ctx.textAlign = 'center';
             ctx.fillText(`BUILDABLE AREA: ${buildableArea.toFixed(2)} sqm`, centerScr.x, centerScr.y);
-
         }
     }
 
-    // 5. Diagonals
+    // 5. Diagonals with annotations
     if (state.type === 'irregular') {
         ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)';
+        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
+        ctx.lineWidth = 1;
 
         state.diagonals.forEach((d, i) => {
+            let dp1, dp2, diagLabel;
             if (state.edges.length === 4 && i === 1) {
-                // Special case for D2 on 4-sided plots: V1-V3
-                const p1 = state.geometry.vertices[1];
-                const p2 = state.geometry.vertices[3];
-                if (p1 && p2) {
-                    const s1 = toScr(p1.x, p1.y);
-                    const s2 = toScr(p2.x, p2.y);
-                    ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.stroke();
-                }
+                dp1 = state.geometry.vertices[1];
+                dp2 = state.geometry.vertices[3];
+                diagLabel = `D2: ${d.length.toFixed(2)}m`;
             } else {
-                // Standard pivot fan (V0 - Vi+2)
-                const v0 = state.geometry.vertices[0];
-                const vTarget = state.geometry.vertices[i + 2];
-                if (v0 && vTarget) {
-                    const s0 = toScr(v0.x, v0.y);
-                    const sTarget = toScr(vTarget.x, vTarget.y);
-                    ctx.beginPath(); ctx.moveTo(s0.x, s0.y); ctx.lineTo(sTarget.x, sTarget.y); ctx.stroke();
-                }
+                dp1 = state.geometry.vertices[0];
+                dp2 = state.geometry.vertices[i + 2];
+                diagLabel = state.edges.length === 4 ? `D1: ${d.length.toFixed(2)}m` : `D${i + 1}: ${d.length.toFixed(2)}m`;
+            }
+            if (dp1 && dp2) {
+                const ds1 = toScr(dp1.x, dp1.y);
+                const ds2 = toScr(dp2.x, dp2.y);
+                ctx.beginPath(); ctx.moveTo(ds1.x, ds1.y); ctx.lineTo(ds2.x, ds2.y); ctx.stroke();
+
+                // Diagonal annotation text
+                ctx.save();
+                ctx.setLineDash([]);
+                const dmx = (ds1.x + ds2.x) / 2;
+                const dmy = (ds1.y + ds2.y) / 2;
+                const dAngle = Math.atan2(ds2.y - ds1.y, ds2.x - ds1.x);
+                let dtAngle = dAngle;
+                if (dtAngle > Math.PI / 2 || dtAngle < -Math.PI / 2) dtAngle += Math.PI;
+                ctx.translate(dmx, dmy);
+                ctx.rotate(dtAngle);
+                ctx.fillStyle = isDark ? 'rgba(168, 162, 158, 0.9)' : 'rgba(87, 83, 78, 0.9)';
+                ctx.font = '600 9px Inter';
+                ctx.textAlign = 'center';
+                ctx.fillText(diagLabel, 0, -6);
+                ctx.restore();
             }
         });
         ctx.setLineDash([]);
@@ -841,6 +1210,9 @@ function drawCanvas() {
         ctx.fillStyle = drawColor; ctx.font = '9px Inter';
         ctx.fillText(`V${i}`, pt.x + 5, pt.y - 5);
     });
+
+    // 7. Area Chart Table
+    drawAreaChart(ctx, isDark);
 }
 
 // --- Global Handlers ---
