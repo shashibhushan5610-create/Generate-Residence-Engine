@@ -105,40 +105,50 @@ class SetbackEngine:
         if not p.is_corner_plot:
             return s
 
-        # Action: Force secondary road side setback to equal Front_Setback.
-        front_idx = p.front_edge_indices[0] if p.front_edge_indices else 0
         n = len(p.plot_coordinates)
         if n > 0 and p.plot_coordinates[0] == p.plot_coordinates[-1]:
-            n -= 1 # adjust for closed polygon
-            
+            n -= 1  # adjust for closed polygon
+
+        # Normalise all road keys to int (JSON may deliver string keys)
+        road_keys_int = {int(k) for k in p.proposed_road_widths_m.keys()}
+        front_indices_int = {int(idx) for idx in p.front_edge_indices}
+
+        # The primary front edge is the first one in front_edge_indices
+        front_idx = int(p.front_edge_indices[0]) if p.front_edge_indices else 0
+
+        # Find the secondary road edge: any road edge NOT in front_edge_indices
         secondary_idx = None
-        if p.proposed_road_widths_m:
-            for idx in p.proposed_road_widths_m.keys():
-                if int(idx) != front_idx:
-                    secondary_idx = int(idx)
-                    break
-                    
+        for idx in sorted(road_keys_int):
+            if idx not in front_indices_int:
+                secondary_idx = idx
+                break
+
         if secondary_idx is not None and n > 0:
-            if secondary_idx == (front_idx + 1) % n:
+            # Determine positional relationship of secondary road to front
+            offset = (secondary_idx - front_idx) % n
+            if offset == 1:
+                # Next edge clockwise → side1
                 s.side1 = max(s.side1, s.front)
-            elif secondary_idx == (front_idx - 1) % n or secondary_idx == (front_idx + n - 1) % n:
+            elif offset == n - 1:
+                # Previous edge (counter-clockwise) → side2
                 s.side2 = max(s.side2, s.front)
-            else:
+            elif offset == 2 and n == 4:
+                # Directly opposite on a 4-sided plot → treat as rear
                 s.rear = max(s.rear, s.front)
+            else:
+                # General case: default to side1
+                s.side1 = max(s.side1, s.front)
         else:
-            s.side1 = max(s.side1, s.front)  # Fallback
-        # Old Layout Exception
+            # No secondary road found via road map — fallback: promote side1
+            s.side1 = max(s.side1, s.front)
+
+        # Old Layout Exception: minimum 1.5m sides
         if p.is_old_approved_layout and p.plot_area_sqm <= 500:
-            if s.side1 < 1.5:
-                 s.side1 = 1.5
-            if s.side2 < 1.5:
-                 s.side2 = 1.5
-                 
-        # Commercial Ground Floor Exception is revoked simply by setting side1,
-        # but if side2 was 0 in base Commercial, and it's a corner, the logic already 
-        # checked `not p.is_corner_plot` in Module 2.
+            s.side1 = max(s.side1, 1.5)
+            s.side2 = max(s.side2, 1.5)
 
         return s
+
 
     def _apply_road_width_override(self, s: SetbackValues) -> SetbackValues:
         """MODULE 3: ROAD-WIDTH OVERRIDE (Bazaar Streets)"""

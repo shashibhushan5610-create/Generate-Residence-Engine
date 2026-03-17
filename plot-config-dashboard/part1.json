@@ -1,0 +1,1409 @@
+{
+    "engine_metadata": {
+        "engine_id": "antigravity-zoning-engine",
+        "version": "2.0.0",
+        "schema_version": "1.4",
+        "product": "Antigravity Generative Floor Plan System",
+        "module": "Residential Zoning Rule Engine",
+        "description": "Production-grade zoning rule engine for single-family independent residential houses. Defines spatial zones, room adjacency, building code constraints, environmental logic, and Vastu soft preferences.",
+        "supported_building_types": [
+            "single_family_residential",
+            "independent_house"
+        ],
+        "pipeline_stage": "zone_assignment_and_constraint_evaluation",
+        "dependencies": {
+            "setback_engine": {
+                "required": true,
+                "version_min": "1.0.0",
+                "description": "Setback Engine runs BEFORE this engine. Setback values are consumed as read-only input constraints.",
+                "inputs_consumed": [
+                    "setbacks.front",
+                    "setbacks.rear",
+                    "setbacks.left",
+                    "setbacks.right"
+                ]
+            },
+            "geometry_solver": {
+                "required": true,
+                "version_min": "1.0.0",
+                "description": "Geometry Layout Solver consumes the output of this engine."
+            }
+        },
+        "constraint_priority_hierarchy": [
+            {
+                "level": 1,
+                "category": "functional_constraints",
+                "override_allowed": false
+            },
+            {
+                "level": 2,
+                "category": "nbc_building_code_constraints",
+                "override_allowed": false
+            },
+            {
+                "level": 3,
+                "category": "geometry_constraints",
+                "override_allowed": false
+            },
+            {
+                "level": 4,
+                "category": "environmental_constraints",
+                "override_allowed": false
+            },
+            {
+                "level": 5,
+                "category": "vastu_preferences",
+                "override_allowed": true,
+                "note": "Soft constraints only. Must never override functional or code constraints."
+            }
+        ],
+        "pipeline_order": [
+            "plot_analysis",
+            "room_adjacency_graph_generation",
+            "zone_assignment",
+            "constraint_evaluation",
+            "geometry_layout_solver_input"
+        ],
+        "setback_policy": {
+            "policy": "READ_ONLY",
+            "note": "This engine does NOT calculate setbacks. Setbacks are injected as non-buildable spatial boundaries. Setback areas may contain: parking, entry_path, landscape, service_access, ventilation_openings.",
+            "non_buildable": true,
+            "permitted_uses_in_setback": [
+                "parking",
+                "entry_path",
+                "landscape",
+                "service_access",
+                "ventilation_openings"
+            ]
+        },
+        "created_by": "Antigravity Architecture Engine Team",
+        "last_updated": "2025-01-01",
+        "units": {
+            "length": "meters",
+            "area": "square_meters",
+            "angle": "degrees"
+        }
+    },
+    "plot_input_schema": {
+        "description": "Expected input schema for plot and setback data provided by external engines.",
+        "required_fields": [
+            "plot_id",
+            "plot_width",
+            "plot_depth",
+            "plot_area",
+            "plot_shape",
+            "plot_orientation",
+            "road_facing",
+            "setbacks"
+        ],
+        "schema": {
+            "plot_id": {
+                "type": "string",
+                "description": "Unique identifier for the plot."
+            },
+            "plot_width": {
+                "type": "number",
+                "unit": "meters",
+                "min": 5.0
+            },
+            "plot_depth": {
+                "type": "number",
+                "unit": "meters",
+                "min": 8.0
+            },
+            "plot_area": {
+                "type": "number",
+                "unit": "sqm",
+                "min": 40.0
+            },
+            "plot_shape": {
+                "type": "string",
+                "enum": [
+                    "rectangular",
+                    "square",
+                    "l_shaped",
+                    "irregular",
+                    "corner_plot",
+                    "flag_plot"
+                ],
+                "default": "rectangular"
+            },
+            "plot_orientation": {
+                "type": "string",
+                "enum": [
+                    "north_facing",
+                    "south_facing",
+                    "east_facing",
+                    "west_facing",
+                    "north_east_facing",
+                    "north_west_facing",
+                    "south_east_facing",
+                    "south_west_facing"
+                ]
+            },
+            "road_facing": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "north",
+                        "south",
+                        "east",
+                        "west"
+                    ]
+                },
+                "description": "Sides of the plot that face a road or public access."
+            },
+            "number_of_floors": {
+                "type": "integer",
+                "min": 1,
+                "max": 4,
+                "default": 2
+            },
+            "floor_height": {
+                "type": "number",
+                "unit": "meters",
+                "default": 3.0,
+                "min": 2.75,
+                "max": 3.6
+            },
+            "setbacks": {
+                "type": "object",
+                "description": "Read-only setback values injected from the Setback Engine.",
+                "required": [
+                    "front",
+                    "rear",
+                    "left",
+                    "right"
+                ],
+                "properties": {
+                    "front": {
+                        "type": "number",
+                        "unit": "meters"
+                    },
+                    "rear": {
+                        "type": "number",
+                        "unit": "meters"
+                    },
+                    "left": {
+                        "type": "number",
+                        "unit": "meters"
+                    },
+                    "right": {
+                        "type": "number",
+                        "unit": "meters"
+                    }
+                }
+            },
+            "buildable_area": {
+                "type": "object",
+                "description": "Computed buildable envelope after setbacks. Read-only from Setback Engine.",
+                "properties": {
+                    "width": {
+                        "type": "number",
+                        "unit": "meters"
+                    },
+                    "depth": {
+                        "type": "number",
+                        "unit": "meters"
+                    },
+                    "area": {
+                        "type": "number",
+                        "unit": "sqm"
+                    }
+                }
+            },
+            "terrain": {
+                "type": "string",
+                "enum": [
+                    "flat",
+                    "sloped",
+                    "terraced"
+                ],
+                "default": "flat"
+            },
+            "climate_zone": {
+                "type": "string",
+                "enum": [
+                    "composite",
+                    "hot_dry",
+                    "warm_humid",
+                    "cold",
+                    "temperate"
+                ],
+                "default": "composite"
+            },
+            "plot_size_category": {
+                "type": "string",
+                "enum": [
+                    "small",
+                    "medium",
+                    "large",
+                    "very_large"
+                ],
+                "description": "Derived from plot_area. Small: <100sqm, Medium: 100-200sqm, Large: 200-400sqm, Very Large: >400sqm"
+            }
+        },
+        "size_category_thresholds": {
+            "small": {
+                "min_area": 0,
+                "max_area": 100
+            },
+            "medium": {
+                "min_area": 100,
+                "max_area": 200
+            },
+            "large": {
+                "min_area": 200,
+                "max_area": 400
+            },
+            "very_large": {
+                "min_area": 400,
+                "max_area": null
+            }
+        }
+    },
+    "zones": {
+        "entry_zone": {
+            "zone_id": "entry_zone",
+            "label": "Entry Zone",
+            "purpose": "Controls access from the street/exterior to the interior. Acts as the first threshold and transition buffer between public exterior and private interior.",
+            "typical_location": "front_of_plot",
+            "priority_floor": [
+                0
+            ],
+            "rooms": [
+                "gate",
+                "entry_walkway",
+                "porch",
+                "foyer"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "public_zone"
+                ],
+                "preferred_adjacent_to": [
+                    "vehicle_zone",
+                    "circulation_zone"
+                ],
+                "must_face": [
+                    "road_side",
+                    "front_setback"
+                ]
+            },
+            "forbidden_adjacencies": [
+                "private_zone",
+                "kitchen_zone"
+            ],
+            "environmental_requirements": {
+                "natural_light": "desirable",
+                "ventilation": "passive_acceptable",
+                "shading": "recommended_for_porch"
+            },
+            "notes": "Gate and entry_walkway may occupy front setback area. Foyer must be inside buildable boundary."
+        },
+        "public_zone": {
+            "zone_id": "public_zone",
+            "label": "Public Zone",
+            "purpose": "Spaces used for formal social interaction and guest reception. Must be accessible from entry without crossing private or family zones.",
+            "typical_location": "front_portion_of_buildable_area",
+            "priority_floor": [
+                0
+            ],
+            "rooms": [
+                "drawing_room",
+                "guest_toilet"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "entry_zone"
+                ],
+                "preferred_adjacent_to": [
+                    "circulation_zone",
+                    "family_zone"
+                ],
+                "must_face": [
+                    "front_or_side"
+                ]
+            },
+            "forbidden_adjacencies": [
+                "private_zone",
+                "kitchen_zone",
+                "utility"
+            ],
+            "environmental_requirements": {
+                "natural_light": "required",
+                "ventilation": "required",
+                "view": "preferred_to_front_or_garden"
+            },
+            "notes": "Guest toilet must not open directly into drawing room. Must access via corridor/lobby."
+        },
+        "family_zone": {
+            "zone_id": "family_zone",
+            "label": "Family Zone",
+            "purpose": "Core social hub of the house for private family interaction, dining, and relaxation. Acts as the central connector in the spatial graph.",
+            "typical_location": "center_of_plan",
+            "priority_floor": [
+                0,
+                1
+            ],
+            "rooms": [
+                "family_living",
+                "dining",
+                "pooja"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "kitchen_zone",
+                    "circulation_zone"
+                ],
+                "preferred_adjacent_to": [
+                    "entry_zone",
+                    "public_zone",
+                    "private_zone"
+                ],
+                "hub_room": "family_living",
+                "must_face": [
+                    "courtyard_or_garden_preferred"
+                ]
+            },
+            "forbidden_adjacencies": [
+                "vehicle_zone"
+            ],
+            "environmental_requirements": {
+                "natural_light": "required",
+                "ventilation": "required",
+                "cross_ventilation": "preferred"
+            },
+            "notes": "Family Living is the primary spatial hub. All major circulation connections pass through or adjacent to family_living."
+        },
+        "private_zone": {
+            "zone_id": "private_zone",
+            "label": "Private Zone",
+            "purpose": "Sleeping and personal retreat spaces. Must be secluded from public and semi-public zones. Accessed only via corridor or family living.",
+            "typical_location": "rear_or_upper_floor",
+            "priority_floor": [
+                1,
+                2
+            ],
+            "rooms": [
+                "master_bedroom",
+                "bedroom"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "circulation_zone",
+                    "toilet_zone"
+                ],
+                "preferred_adjacent_to": [
+                    "family_zone"
+                ],
+                "preferred_location": [
+                    "rear_of_plot",
+                    "upper_floors"
+                ]
+            },
+            "forbidden_adjacencies": [
+                "entry_zone",
+                "public_zone",
+                "vehicle_zone",
+                "kitchen_zone"
+            ],
+            "environmental_requirements": {
+                "natural_light": "required",
+                "ventilation": "required",
+                "cross_ventilation": "preferred",
+                "noise_buffer": "required_from_road"
+            },
+            "notes": "Master bedroom preferred at South-West (Vastu soft rule). Bedrooms on ground floor only if plot is single storey."
+        },
+        "kitchen_zone": {
+            "zone_id": "kitchen_zone",
+            "label": "Kitchen Zone",
+            "purpose": "Food preparation, storage, and utility operations. Must have direct access to dining and external ventilation or utility yard.",
+            "typical_location": "rear_portion_of_plan",
+            "priority_floor": [
+                0
+            ],
+            "rooms": [
+                "kitchen",
+                "pantry",
+                "store_room",
+                "utility"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "family_zone"
+                ],
+                "dining_connection": "required",
+                "preferred_adjacent_to": [
+                    "outdoor_zone",
+                    "toilet_zone"
+                ],
+                "preferred_location": [
+                    "south_east_vastu_soft",
+                    "rear_or_side_external_wall"
+                ]
+            },
+            "forbidden_adjacencies": [
+                "entry_zone",
+                "public_zone",
+                "private_zone"
+            ],
+            "environmental_requirements": {
+                "natural_light": "required",
+                "ventilation": "required",
+                "exhaust": "required",
+                "external_wall_or_ots": "required",
+                "utility_yard_access": "preferred"
+            },
+            "notes": "Kitchen must connect to dining. Utility to connect to kitchen. Ventilation priority: external_wall > utility_yard > OTS."
+        },
+        "toilet_zone": {
+            "zone_id": "toilet_zone",
+            "label": "Toilet Zone",
+            "purpose": "Sanitation and bathing. Bathrooms attached to bedrooms; powder rooms/guest toilets accessed via corridor. Clustered near kitchen and utility for plumbing efficiency.",
+            "typical_location": "distributed_near_bedrooms_and_utility",
+            "priority_floor": [
+                0,
+                1
+            ],
+            "rooms": [
+                "bathroom",
+                "powder_room"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "private_zone",
+                    "circulation_zone"
+                ],
+                "preferred_adjacent_to": [
+                    "kitchen_zone"
+                ],
+                "cluster_near": [
+                    "kitchen",
+                    "utility"
+                ],
+                "bedroom_toilets": "attached_to_bedroom"
+            },
+            "forbidden_adjacencies": [
+                "drawing_room",
+                "dining",
+                "pooja"
+            ],
+            "environmental_requirements": {
+                "natural_light": "preferred",
+                "ventilation": "required",
+                "external_wall_or_ots": "required"
+            },
+            "notes": "Guest toilet: accessed via corridor/lobby only. Bedroom toilets: attached directly. Cluster plumbing near kitchen/utility to reduce piping runs."
+        },
+        "circulation_zone": {
+            "zone_id": "circulation_zone",
+            "label": "Circulation Zone",
+            "purpose": "Movement infrastructure connecting all zones. Enables access to private zones without crossing public zones. Houses staircase and landings.",
+            "typical_location": "central_or_spine",
+            "priority_floor": [
+                0,
+                1,
+                2
+            ],
+            "rooms": [
+                "corridor",
+                "staircase",
+                "landing"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "family_zone",
+                    "private_zone",
+                    "toilet_zone"
+                ],
+                "preferred_adjacent_to": [
+                    "entry_zone",
+                    "public_zone"
+                ],
+                "staircase_location": {
+                    "small_plot": "near_entry_or_parking",
+                    "large_plot": "inside_family_zone_or_corridor"
+                }
+            },
+            "forbidden_adjacencies": [
+                "vehicle_zone"
+            ],
+            "environmental_requirements": {
+                "natural_light": "preferred",
+                "ventilation": "passive_acceptable",
+                "staircase_ventilation": "required"
+            }
+        },
+        "outdoor_zone": {
+            "zone_id": "outdoor_zone",
+            "label": "Outdoor / Environmental Zone",
+            "purpose": "Open-to-sky spaces providing light, ventilation, and amenity. Includes courtyards, balconies, OTS voids, backyard, and garden.",
+            "typical_location": "distributed_per_generation_rules",
+            "priority_floor": [
+                0,
+                1,
+                2
+            ],
+            "rooms": [
+                "courtyard",
+                "balcony",
+                "ots",
+                "backyard",
+                "garden"
+            ],
+            "adjacency_preferences": {
+                "courtyard": {
+                    "preferred_adjacent_to": [
+                        "family_zone",
+                        "kitchen_zone",
+                        "circulation_zone"
+                    ]
+                },
+                "balcony": {
+                    "preferred_adjacent_to": [
+                        "bedroom",
+                        "family_living"
+                    ],
+                    "upper_floor_only": true
+                },
+                "ots": {
+                    "auto_generated_when": "room_has_no_external_wall"
+                },
+                "backyard": {
+                    "preferred_adjacent_to": [
+                        "kitchen_zone",
+                        "utility"
+                    ]
+                },
+                "garden": {
+                    "preferred_adjacent_to": [
+                        "entry_zone",
+                        "outdoor_zone"
+                    ]
+                }
+            },
+            "forbidden_adjacencies": [],
+            "environmental_requirements": {
+                "ots_min_size": {
+                    "width": 0.9,
+                    "depth": 0.9,
+                    "unit": "meters"
+                },
+                "courtyard_min_width": {
+                    "value": 2.5,
+                    "unit": "meters"
+                },
+                "courtyard_enabled_threshold": {
+                    "min_plot_area": 200,
+                    "unit": "sqm"
+                }
+            }
+        },
+        "vehicle_zone": {
+            "zone_id": "vehicle_zone",
+            "label": "Vehicle / Parking Zone",
+            "purpose": "Vehicle storage, parking, and driveway access. Typically occupies front setback area. Type depends on plot size.",
+            "typical_location": "front_setback_or_side",
+            "priority_floor": [
+                0
+            ],
+            "rooms": [
+                "parking",
+                "driveway"
+            ],
+            "adjacency_preferences": {
+                "must_be_adjacent_to": [
+                    "entry_zone"
+                ],
+                "preferred_adjacent_to": [
+                    "outdoor_zone"
+                ],
+                "must_access_from": [
+                    "road_side"
+                ]
+            },
+            "forbidden_adjacencies": [
+                "private_zone",
+                "family_zone",
+                "kitchen_zone",
+                "toilet_zone"
+            ],
+            "environmental_requirements": {
+                "ventilation": "natural_open_or_mechanical",
+                "drainage": "required"
+            },
+            "parking_type_by_plot_size": {
+                "small": "open_parking",
+                "medium": "covered_parking",
+                "large": "garage_or_stilt",
+                "very_large": "garage_or_stilt"
+            }
+        }
+    },
+    "room_inventory": {
+        "gate": {
+            "room_id": "gate",
+            "zone": "entry_zone",
+            "label": "Gate",
+            "type": "entry_element",
+            "floor": [
+                0
+            ],
+            "min_width": 1.2,
+            "min_height": 1.8,
+            "is_enclosed": false,
+            "is_buildable_area": false,
+            "location_constraint": "front_setback_boundary",
+            "notes": "Gate located at plot boundary. May occupy setback. Not a room but a spatial element."
+        },
+        "entry_walkway": {
+            "room_id": "entry_walkway",
+            "zone": "entry_zone",
+            "label": "Entry Walkway / Path",
+            "type": "circulation_element",
+            "floor": [
+                0
+            ],
+            "min_width": 1.2,
+            "preferred_width": 1.5,
+            "is_enclosed": false,
+            "location_constraint": "front_setback_or_buildable_edge",
+            "notes": "Connects gate to porch. May occupy front setback."
+        },
+        "porch": {
+            "room_id": "porch",
+            "zone": "entry_zone",
+            "label": "Porch / Verandah",
+            "type": "semi_enclosed",
+            "floor": [
+                0
+            ],
+            "min_area": 3.0,
+            "preferred_area": 6.0,
+            "min_width": 1.5,
+            "preferred_width": 2.4,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": false,
+            "is_roofed": true,
+            "ventilation": "open_sides",
+            "adjacency_required": [
+                "foyer"
+            ],
+            "notes": "Transitional buffer. Shading recommended."
+        },
+        "foyer": {
+            "room_id": "foyer",
+            "zone": "entry_zone",
+            "label": "Foyer / Entrance Hall",
+            "type": "semi_public",
+            "floor": [
+                0
+            ],
+            "min_area": 4.0,
+            "preferred_area": 8.0,
+            "min_width": 1.8,
+            "preferred_width": 2.4,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": true,
+            "ventilation_required": true,
+            "adjacency_required": [
+                "porch",
+                "drawing_room",
+                "corridor"
+            ],
+            "adjacency_preferred": [
+                "staircase"
+            ],
+            "notes": "Acts as buffer between exterior and interior. Should have view toward drawing room."
+        },
+        "drawing_room": {
+            "room_id": "drawing_room",
+            "zone": "public_zone",
+            "label": "Drawing Room / Living Room",
+            "type": "formal_social",
+            "floor": [
+                0
+            ],
+            "min_area": 12.0,
+            "preferred_area": 20.0,
+            "min_width": 3.0,
+            "preferred_width": 4.5,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": true,
+            "natural_light_required": true,
+            "ventilation_required": true,
+            "external_wall_preferred": true,
+            "adjacency_required": [
+                "foyer"
+            ],
+            "adjacency_preferred": [
+                "family_living",
+                "corridor"
+            ],
+            "adjacency_forbidden": [
+                "kitchen",
+                "bathroom",
+                "utility",
+                "store_room"
+            ],
+            "view_preferred": "front_or_garden",
+            "notes": "Primary formal reception space."
+        },
+        "guest_toilet": {
+            "room_id": "guest_toilet",
+            "zone": "public_zone",
+            "label": "Guest Toilet / WC",
+            "type": "wet_service",
+            "floor": [
+                0
+            ],
+            "min_area": 1.8,
+            "preferred_area": 2.5,
+            "min_width": 0.9,
+            "preferred_width": 1.2,
+            "ceiling_height_min": 2.4,
+            "is_enclosed": true,
+            "ventilation_required": true,
+            "external_wall_or_ots": true,
+            "adjacency_required": [
+                "corridor"
+            ],
+            "adjacency_forbidden": [
+                "drawing_room",
+                "dining",
+                "kitchen",
+                "pooja"
+            ],
+            "notes": "Must NEVER open directly into drawing room. Access via corridor/lobby only."
+        },
+        "family_living": {
+            "room_id": "family_living",
+            "zone": "family_zone",
+            "label": "Family Living Room",
+            "type": "informal_social",
+            "is_hub": true,
+            "floor": [
+                0,
+                1
+            ],
+            "min_area": 15.0,
+            "preferred_area": 25.0,
+            "min_width": 3.5,
+            "preferred_width": 5.0,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": true,
+            "natural_light_required": true,
+            "ventilation_required": true,
+            "cross_ventilation_preferred": true,
+            "adjacency_required": [
+                "dining",
+                "corridor",
+                "staircase"
+            ],
+            "adjacency_preferred": [
+                "drawing_room",
+                "master_bedroom",
+                "courtyard",
+                "balcony"
+            ],
+            "notes": "Central hub of the house. All major room connections pass through or near family_living."
+        },
+        "dining": {
+            "room_id": "dining",
+            "zone": "family_zone",
+            "label": "Dining Room",
+            "type": "informal_social",
+            "floor": [
+                0
+            ],
+            "min_area": 9.0,
+            "preferred_area": 14.0,
+            "min_width": 2.8,
+            "preferred_width": 3.6,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": false,
+            "open_plan_possible": true,
+            "natural_light_required": true,
+            "ventilation_required": true,
+            "adjacency_required": [
+                "kitchen",
+                "family_living"
+            ],
+            "adjacency_preferred": [
+                "corridor"
+            ],
+            "adjacency_forbidden": [
+                "bathroom",
+                "toilet",
+                "utility"
+            ],
+            "notes": "May be open-plan with family_living. Must connect to kitchen."
+        },
+        "pooja": {
+            "room_id": "pooja",
+            "zone": "family_zone",
+            "label": "Pooja Room / Prayer Room",
+            "type": "ritual_space",
+            "floor": [
+                0,
+                1
+            ],
+            "min_area": 2.0,
+            "preferred_area": 4.0,
+            "min_width": 1.2,
+            "preferred_width": 1.8,
+            "ceiling_height_min": 2.4,
+            "is_enclosed": true,
+            "natural_light_preferred": true,
+            "ventilation_required": false,
+            "adjacency_preferred": [
+                "family_living",
+                "corridor"
+            ],
+            "adjacency_forbidden": [
+                "bathroom",
+                "toilet",
+                "utility",
+                "store_room"
+            ],
+            "vastu": {
+                "preferred_direction": "north_east",
+                "priority": "soft",
+                "override_if_conflicts_with": [
+                    "functional",
+                    "code",
+                    "geometry",
+                    "environmental"
+                ]
+            },
+            "notes": "Vastu soft rule: North-East preferred."
+        },
+        "master_bedroom": {
+            "room_id": "master_bedroom",
+            "zone": "private_zone",
+            "label": "Master Bedroom",
+            "type": "private_sleeping",
+            "floor": [
+                0,
+                1
+            ],
+            "min_area": 14.0,
+            "preferred_area": 20.0,
+            "min_width": 3.2,
+            "preferred_width": 4.2,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": true,
+            "natural_light_required": true,
+            "ventilation_required": true,
+            "cross_ventilation_preferred": true,
+            "noise_buffer_from_road": true,
+            "adjacency_required": [
+                "bathroom"
+            ],
+            "adjacency_preferred": [
+                "corridor",
+                "balcony"
+            ],
+            "adjacency_forbidden": [
+                "drawing_room",
+                "kitchen",
+                "utility",
+                "vehicle_zone"
+            ],
+            "vastu": {
+                "preferred_direction": "south_west",
+                "priority": "soft",
+                "override_if_conflicts_with": [
+                    "functional",
+                    "code",
+                    "geometry",
+                    "environmental"
+                ]
+            },
+            "notes": "Attached bathroom required. Vastu: South-West preferred."
+        },
+        "bedroom": {
+            "room_id": "bedroom",
+            "zone": "private_zone",
+            "label": "Bedroom",
+            "type": "private_sleeping",
+            "floor": [
+                0,
+                1,
+                2
+            ],
+            "instances": {
+                "min": 0,
+                "max": 4
+            },
+            "min_area": 10.0,
+            "preferred_area": 15.0,
+            "min_width": 2.8,
+            "preferred_width": 3.6,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": true,
+            "natural_light_required": true,
+            "ventilation_required": true,
+            "adjacency_required": [
+                "corridor"
+            ],
+            "adjacency_preferred": [
+                "bathroom",
+                "balcony"
+            ],
+            "adjacency_forbidden": [
+                "drawing_room",
+                "kitchen",
+                "utility",
+                "vehicle_zone"
+            ],
+            "notes": "Multiple instances possible. Each bedroom ideally has attached or shared bathroom."
+        },
+        "kitchen": {
+            "room_id": "kitchen",
+            "zone": "kitchen_zone",
+            "label": "Kitchen",
+            "type": "wet_service",
+            "floor": [
+                0
+            ],
+            "min_area": 7.0,
+            "preferred_area": 12.0,
+            "min_width": 2.4,
+            "preferred_width": 3.2,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": true,
+            "natural_light_required": true,
+            "ventilation_required": true,
+            "exhaust_required": true,
+            "external_wall_or_ots": true,
+            "adjacency_required": [
+                "dining"
+            ],
+            "adjacency_preferred": [
+                "pantry",
+                "store_room",
+                "utility",
+                "backyard"
+            ],
+            "adjacency_forbidden": [
+                "drawing_room",
+                "master_bedroom",
+                "bedroom",
+                "pooja"
+            ],
+            "layout_by_size": {
+                "small": "parallel",
+                "medium": "l_shaped",
+                "large": "u_shaped"
+            },
+            "vastu": {
+                "preferred_direction": "south_east",
+                "priority": "soft",
+                "override_if_conflicts_with": [
+                    "functional",
+                    "code",
+                    "geometry",
+                    "environmental"
+                ]
+            },
+            "notes": "Kitchen must connect to dining. Ventilation: external_wall > utility_yard > OTS."
+        },
+        "pantry": {
+            "room_id": "pantry",
+            "zone": "kitchen_zone",
+            "label": "Pantry",
+            "type": "storage",
+            "floor": [
+                0
+            ],
+            "min_area": 2.0,
+            "preferred_area": 4.0,
+            "min_width": 1.0,
+            "preferred_width": 1.5,
+            "ceiling_height_min": 2.4,
+            "is_enclosed": true,
+            "ventilation_required": false,
+            "adjacency_required": [
+                "kitchen"
+            ],
+            "adjacency_forbidden": [],
+            "notes": "Dry goods and kitchen supplies storage. Adjacent to kitchen."
+        },
+        "store_room": {
+            "room_id": "store_room",
+            "zone": "kitchen_zone",
+            "label": "Store Room",
+            "type": "storage",
+            "floor": [
+                0,
+                1
+            ],
+            "min_area": 3.0,
+            "preferred_area": 6.0,
+            "min_width": 1.2,
+            "preferred_width": 1.8,
+            "ceiling_height_min": 2.4,
+            "is_enclosed": true,
+            "ventilation_required": false,
+            "adjacency_preferred": [
+                "kitchen",
+                "utility",
+                "corridor"
+            ],
+            "adjacency_forbidden": [],
+            "notes": "General household storage. May be adjacent to utility or kitchen."
+        },
+        "utility": {
+            "room_id": "utility",
+            "zone": "kitchen_zone",
+            "label": "Utility / Service Yard",
+            "type": "wet_service",
+            "floor": [
+                0
+            ],
+            "min_area": 3.0,
+            "preferred_area": 6.0,
+            "min_width": 1.5,
+            "preferred_width": 2.0,
+            "ceiling_height_min": 2.4,
+            "is_enclosed": false,
+            "semi_open_acceptable": true,
+            "ventilation_required": true,
+            "external_wall_or_ots": true,
+            "adjacency_required": [
+                "kitchen"
+            ],
+            "adjacency_preferred": [
+                "backyard",
+                "store_room"
+            ],
+            "adjacency_forbidden": [
+                "drawing_room",
+                "bedroom",
+                "master_bedroom"
+            ],
+            "notes": "Washing, drying, service access. Ventilation: external or OTS."
+        },
+        "bathroom": {
+            "room_id": "bathroom",
+            "zone": "toilet_zone",
+            "label": "Bathroom / Attached Toilet",
+            "type": "wet_service",
+            "floor": [
+                0,
+                1,
+                2
+            ],
+            "instances": {
+                "min": 0,
+                "max": 5
+            },
+            "min_area": 2.5,
+            "preferred_area": 4.5,
+            "min_width": 1.2,
+            "preferred_width": 1.5,
+            "ceiling_height_min": 2.4,
+            "is_enclosed": true,
+            "ventilation_required": true,
+            "external_wall_or_ots": true,
+            "adjacency_required": [
+                "master_bedroom_or_bedroom"
+            ],
+            "adjacency_forbidden": [
+                "kitchen",
+                "dining",
+                "drawing_room",
+                "pooja"
+            ],
+            "notes": "Attached to bedroom. Ventilation: external_wall > OTS."
+        },
+        "powder_room": {
+            "room_id": "powder_room",
+            "zone": "toilet_zone",
+            "label": "Powder Room / Half Bath",
+            "type": "wet_service",
+            "floor": [
+                0,
+                1
+            ],
+            "min_area": 1.5,
+            "preferred_area": 2.5,
+            "min_width": 0.9,
+            "preferred_width": 1.2,
+            "ceiling_height_min": 2.4,
+            "is_enclosed": true,
+            "ventilation_required": true,
+            "external_wall_or_ots": true,
+            "adjacency_required": [
+                "corridor"
+            ],
+            "adjacency_forbidden": [
+                "drawing_room",
+                "dining",
+                "pooja",
+                "kitchen"
+            ],
+            "notes": "Common toilet for circulation use. Access via corridor only."
+        },
+        "corridor": {
+            "room_id": "corridor",
+            "zone": "circulation_zone",
+            "label": "Corridor / Passage",
+            "type": "circulation",
+            "floor": [
+                0,
+                1,
+                2
+            ],
+            "min_width": 1.0,
+            "preferred_width": 1.2,
+            "max_width": 1.8,
+            "ceiling_height_min": 2.75,
+            "is_enclosed": true,
+            "ventilation_required": false,
+            "natural_light_preferred": true,
+            "adjacency_required": [
+                "family_living"
+            ],
+            "adjacency_preferred": [
+                "staircase",
+                "bedroom",
+                "bathroom",
+                "powder_room"
+            ],
+            "notes": "Spine of private zone access. Must not create dead-end corridors exceeding 9m."
+        },
+        "staircase": {
+            "room_id": "staircase",
+            "zone": "circulation_zone",
+            "label": "Staircase",
+            "type": "vertical_circulation",
+            "floor": [
+                0,
+                1,
+                2
+            ],
+            "min_width": {
+                "small": 0.9,
+                "medium": 1.0,
+                "large": 1.1,
+                "very_large": 1.2
+            },
+            "preferred_width": 1.2,
+            "step_formula": "2R + T = 600-650mm",
+            "rise_range": {
+                "min": 0.150,
+                "max": 0.175,
+                "unit": "meters"
+            },
+            "tread_range": {
+                "min": 0.250,
+                "max": 0.300,
+                "unit": "meters"
+            },
+            "headroom_min": 2.1,
+            "is_enclosed": false,
+            "ventilation_required": true,
+            "adjacency_required": [
+                "family_living_or_corridor"
+            ],
+            "adjacency_preferred": [
+                "landing"
+            ],
+            "location_by_plot_size": {
+                "small": "near_entry_or_parking",
+                "medium": "near_entry_or_corridor",
+                "large": "inside_family_zone_or_corridor",
+                "very_large": "inside_family_zone_or_corridor"
+            },
+            "landing_required_when": {
+                "direction_change": true,
+                "steps_exceed": 12
+            },
+            "notes": "NBC compliance: min headroom 2.1m. Handrails required on both sides if width > 1.0m."
+        },
+        "landing": {
+            "room_id": "landing",
+            "zone": "circulation_zone",
+            "label": "Stair Landing",
+            "type": "circulation",
+            "floor": [
+                0,
+                1,
+                2
+            ],
+            "min_width": {
+                "equals": "staircase_width"
+            },
+            "min_depth": {
+                "equals": "staircase_width"
+            },
+            "is_enclosed": false,
+            "adjacency_required": [
+                "staircase"
+            ],
+            "notes": "Generated automatically at direction changes or when steps exceed 12."
+        },
+        "courtyard": {
+            "room_id": "courtyard",
+            "zone": "outdoor_zone",
+            "label": "Courtyard",
+            "type": "open_to_sky",
+            "floor": [
+                0
+            ],
+            "min_width": 2.5,
+            "min_area": 9.0,
+            "is_enclosed": false,
+            "is_open_to_sky": true,
+            "generation": {
+                "condition": "plot_area_min_200sqm",
+                "auto_generate": true
+            },
+            "adjacency_preferred": [
+                "family_zone",
+                "kitchen_zone",
+                "circulation_zone"
+            ],
+            "notes": "Only generated when plot area >= 200sqm. Provides light and ventilation to internal rooms."
+        },
+        "balcony": {
+            "room_id": "balcony",
+            "zone": "outdoor_zone",
+            "label": "Balcony",
+            "type": "semi_open",
+            "floor": [
+                1,
+                2
+            ],
+            "min_area": 2.5,
+            "preferred_area": 5.0,
+            "min_width": 1.2,
+            "preferred_width": 1.8,
+            "is_enclosed": false,
+            "generation": {
+                "condition": "upper_floor_present_and_bedroom_faces_open_side",
+                "auto_generate": true
+            },
+            "adjacency_required": [
+                "bedroom_or_family_living"
+            ],
+            "notes": "Upper floor only. Generated when bedroom or family_living faces an open or setback side."
+        },
+        "ots": {
+            "room_id": "ots",
+            "zone": "outdoor_zone",
+            "label": "Open-to-Sky / Ventilation Void",
+            "type": "ventilation_void",
+            "floor": [
+                0,
+                1,
+                2
+            ],
+            "min_width": 0.9,
+            "min_depth": 0.9,
+            "min_area": 0.81,
+            "is_enclosed": false,
+            "is_open_to_sky": true,
+            "generation": {
+                "condition": "room_has_no_external_wall",
+                "auto_generate": true,
+                "ventilation_priority": 3
+            },
+            "adjacency_required": [
+                "room_without_external_ventilation"
+            ],
+            "notes": "Auto-generated when a habitable room or wet room has no external wall access. Minimum 0.9m x 0.9m."
+        },
+        "backyard": {
+            "room_id": "backyard",
+            "zone": "outdoor_zone",
+            "label": "Backyard / Rear Garden",
+            "type": "open_outdoor",
+            "floor": [
+                0
+            ],
+            "min_area": 6.0,
+            "is_enclosed": false,
+            "is_open_to_sky": true,
+            "adjacency_preferred": [
+                "kitchen",
+                "utility",
+                "dining"
+            ],
+            "notes": "Located in rear setback or buildable rear portion."
+        },
+        "garden": {
+            "room_id": "garden",
+            "zone": "outdoor_zone",
+            "label": "Garden / Landscape Area",
+            "type": "open_outdoor",
+            "floor": [
+                0
+            ],
+            "is_enclosed": false,
+            "is_open_to_sky": true,
+            "adjacency_preferred": [
+                "entry_zone",
+                "drawing_room"
+            ],
+            "notes": "May occupy portions of front setback or side setback."
+        },
+        "parking": {
+            "room_id": "parking",
+            "zone": "vehicle_zone",
+            "label": "Parking",
+            "type": "vehicle_space",
+            "floor": [
+                0
+            ],
+            "min_width": 2.5,
+            "min_depth": 5.0,
+            "min_area": 12.5,
+            "is_enclosed": false,
+            "location": "front_setback_or_side",
+            "generation": {
+                "type_by_plot_size": {
+                    "small": "open_parking",
+                    "medium": "covered_parking",
+                    "large": "garage_or_stilt",
+                    "very_large": "garage_or_stilt"
+                }
+            },
+            "adjacency_required": [
+                "driveway",
+                "entry_zone"
+            ],
+            "adjacency_forbidden": [
+                "private_zone",
+                "family_zone",
+                "kitchen_zone"
+            ],
+            "notes": "Minimum: 2.5m x 5.0m per car. May occupy setback area."
+        },
+        "driveway": {
+            "room_id": "driveway",
+            "zone": "vehicle_zone",
+            "label": "Driveway",
+            "type": "vehicle_circulation",
+            "floor": [
+                0
+            ],
+            "min_width": 3.0,
+            "is_enclosed": false,
+            "location": "front_setback",
+            "generation": {
+                "condition": "frontage_width_min_4m",
+                "auto_generate": true
+            },
+            "adjacency_required": [
+                "parking"
+            ],
+            "notes": "Generated conditionally based on frontage width (min 4m recommended)."
+        }
+    }
+}

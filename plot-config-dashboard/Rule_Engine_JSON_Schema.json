@@ -1,0 +1,132 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Rule Engine Data Schema",
+    "type": "object",
+    "required": [
+        "_meta",
+        "building_categories",
+        "rules"
+    ],
+    "properties": {
+        "_meta": {
+            "type": "object",
+            "required": [
+                "title",
+                "bylaw_version"
+            ],
+            "properties": {
+                "title": {
+                    "type": "string"
+                },
+                "jurisdiction": {
+                    "type": "string"
+                },
+                "bylaw_version": {
+                    "type": "string"
+                }
+            }
+        },
+        "building_categories": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "required": [
+                    "label",
+                    "code"
+                ],
+                "properties": {
+                    "label": {
+                        "type": "string"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "rules": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "rule_id",
+                    "rule_name",
+                    "parameter"
+                ],
+                "properties": {
+                    "rule_id": {
+                        "type": "string"
+                    },
+                    "rule_name": {
+                        "type": "string"
+                    },
+                    "severity": {
+                        "enum": [
+                            "error",
+                            "warning",
+                            "info"
+                        ]
+                    },
+                    "building_type": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "condition": {
+                        "type": "object",
+                        "properties": {
+                            "field": {
+                                "type": "string"
+                            },
+                            "operator": {
+                                "type": "string"
+                            },
+                            "value": {
+                                "type": [
+                                    "string",
+                                    "number",
+                                    "boolean",
+                                    "array"
+                                ]
+                            },
+                            "conditions": {
+                                "type": "array"
+                            }
+                        }
+                    },
+                    "parameter": {
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "operator",
+                            "value"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "operator": {
+                                "type": "string"
+                            },
+                            "value": {
+                                "type": [
+                                    "number",
+                                    "string",
+                                    "boolean",
+                                    "array"
+                                ]
+                            },
+                            "unit": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
