@@ -1,7 +1,0 @@
-networkx>=2.6
-shapely>=2.0
-ortools>=9.7
-
-# Optional dependencies for visualization/debugging
-matplotlib>=3.5
-geopandas>=0.12
