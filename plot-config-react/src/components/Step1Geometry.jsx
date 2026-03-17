@@ -5,19 +5,19 @@ export default function Step1Geometry({
   edges, addEdge, removeEdge, updateEdge,
   diagonals, addDiagonal, removeDiagonal, updateDiagonal,
   geoResult,
+  sbFront, setSbFront,
+  sbRear, setSbRear,
+  sbLeft, setSbLeft,
+  sbRight, setSbRight,
+  floors, setFloors,
+  maxH, setMaxH,
 }) {
   return (
     <div className="step-block">
       <div className="step-title"><span className="step-num">1</span> Geometry Definition</div>
       <div className="btn-group mb-1">
-        <button
-          className={`btn-seg ${geoMode === 'regular' ? 'active' : ''}`}
-          onClick={() => setGeoMode('regular')}
-        >Regular</button>
-        <button
-          className={`btn-seg ${geoMode === 'irregular' ? 'active' : ''}`}
-          onClick={() => setGeoMode('irregular')}
-        >Irregular</button>
+        <button className={`btn-seg ${geoMode === 'regular' ? 'active' : ''}`} onClick={() => setGeoMode('regular')}>Regular</button>
+        <button className={`btn-seg ${geoMode === 'irregular' ? 'active' : ''}`} onClick={() => setGeoMode('irregular')}>Irregular</button>
       </div>
 
       {geoMode === 'regular' && (
@@ -27,7 +27,7 @@ export default function Step1Geometry({
             <input type="number" step="0.1" value={regWidth} onChange={e => setRegWidth(e.target.value)} />
           </div>
           <div className="form-group">
-            <label>Height (m)</label>
+            <label>Depth (m)</label>
             <input type="number" step="0.1" value={regHeight} onChange={e => setRegHeight(e.target.value)} />
           </div>
         </div>
@@ -40,15 +40,8 @@ export default function Step1Geometry({
             {edges.map((e, i) => (
               <div key={e.id} className="list-row">
                 <span className="list-label">S{i + 1}</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={e.length}
-                  onChange={ev => updateEdge(e.id, ev.target.value)}
-                />
-                {edges.length > 3 && (
-                  <button className="btn-icon" onClick={() => removeEdge(e.id)}>×</button>
-                )}
+                <input type="number" step="0.1" value={e.length} onChange={ev => updateEdge(e.id, ev.target.value)} />
+                {edges.length > 3 && <button className="btn-icon" onClick={() => removeEdge(e.id)}>×</button>}
               </div>
             ))}
             <button className="btn-outline sm" onClick={addEdge}>+ Side</button>
@@ -59,26 +52,51 @@ export default function Step1Geometry({
             {diagonals.map((d, i) => (
               <div key={d.id} className="list-row">
                 <span className="list-label">D{i + 1}</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={d.length}
-                  onChange={ev => updateDiagonal(d.id, ev.target.value)}
-                />
+                <input type="number" step="0.1" value={d.length} onChange={ev => updateDiagonal(d.id, ev.target.value)} />
                 <button className="btn-icon" onClick={() => removeDiagonal(d.id)}>×</button>
               </div>
             ))}
             <button className="btn-outline sm" onClick={addDiagonal}>+ Diagonal</button>
           </div>
 
-          {geoResult.closureError > 0.01 && (
-            <div className="alert warn">Closure error: {geoResult.closureError.toFixed(3)} m</div>
-          )}
-          {geoResult.isSelfIntersecting && (
-            <div className="alert error">Self-intersecting polygon detected.</div>
-          )}
+          {geoResult.closureError > 0.01 && <div className="alert warn">Closure error: {geoResult.closureError.toFixed(3)} m</div>}
+          {geoResult.isSelfIntersecting && <div className="alert error">Self-intersecting polygon detected.</div>}
         </>
       )}
+
+      {/* Setbacks */}
+      <div className="section-divider">Setbacks (m)</div>
+      <div className="setback-grid">
+        <div className="form-group sb-front">
+          <label>Front</label>
+          <input type="number" step="0.1" min="0" value={sbFront} onChange={e => setSbFront(e.target.value)} />
+        </div>
+        <div className="form-group sb-rear">
+          <label>Rear</label>
+          <input type="number" step="0.1" min="0" value={sbRear} onChange={e => setSbRear(e.target.value)} />
+        </div>
+        <div className="form-group sb-left">
+          <label>Left</label>
+          <input type="number" step="0.1" min="0" value={sbLeft} onChange={e => setSbLeft(e.target.value)} />
+        </div>
+        <div className="form-group sb-right">
+          <label>Right</label>
+          <input type="number" step="0.1" min="0" value={sbRight} onChange={e => setSbRight(e.target.value)} />
+        </div>
+      </div>
+
+      {/* Building params */}
+      <div className="section-divider">Building Parameters</div>
+      <div className="input-row">
+        <div className="form-group">
+          <label>Floors</label>
+          <input type="number" step="1" min="1" max="20" value={floors} onChange={e => setFloors(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Max Height (m)</label>
+          <input type="number" step="0.5" min="3" max="100" value={maxH} onChange={e => setMaxH(e.target.value)} />
+        </div>
+      </div>
     </div>
   );
 }

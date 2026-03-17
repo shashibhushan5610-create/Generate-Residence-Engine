@@ -167,8 +167,18 @@ function SetbackDim({ p1, p2, label, color, textColor, stageScale }) {
   );
 }
 
+const ZONE_COLORS = {
+  threshold: { fill: 'rgba(244,114,182,0.28)', stroke: 'rgba(244,114,182,0.85)' },
+  social:    { fill: 'rgba(234,179,8,0.28)',   stroke: 'rgba(234,179,8,0.85)'   },
+  private:   { fill: 'rgba(59,130,246,0.25)',  stroke: 'rgba(59,130,246,0.85)'  },
+  service:   { fill: 'rgba(249,115,22,0.25)',  stroke: 'rgba(249,115,22,0.85)'  },
+  outdoor:   { fill: 'rgba(34,197,94,0.25)',   stroke: 'rgba(34,197,94,0.85)'   },
+  master:    { fill: 'rgba(167,139,250,0.28)', stroke: 'rgba(167,139,250,0.85)' },
+};
+
 export default function CanvasView({
-  geoResult, complianceResult, roads, showDims, theme,
+  geoResult, buildableVertices, complianceResult, roads, showDims,
+  showZones, showWalls, zoningResult, northAngle, theme,
   onVertexDrag, onVertexDragEnd,
 }) {
   const containerRef = useRef(null);
@@ -374,6 +384,37 @@ export default function CanvasView({
             />
           )}
         </Layer>
+
+        {/* Zones overlay */}
+        {showZones && zoningResult && (
+          <Layer>
+            {Object.entries(zoningResult.zones).map(([key, poly]) => {
+              if (!poly || poly.length < 3) return null;
+              const zc = ZONE_COLORS[key] || { fill: 'rgba(100,116,139,0.2)', stroke: 'rgba(100,116,139,0.6)' };
+              const sPts = poly.map(w2s);
+              const centroid = sPts.reduce((a, p) => ({ x: a.x + p.x / sPts.length, y: a.y + p.y / sPts.length }), { x: 0, y: 0 });
+              return (
+                <Group key={key}>
+                  <Line
+                    points={flatPts(sPts)} closed
+                    fill={zc.fill} stroke={zc.stroke}
+                    strokeWidth={1.5 / stageScale}
+                  />
+                  <Text
+                    text={key.toUpperCase()}
+                    x={centroid.x} y={centroid.y}
+                    fontSize={9 / stageScale}
+                    fill={zc.stroke}
+                    fontFamily="Inter, system-ui, sans-serif"
+                    fontStyle="bold"
+                    offsetX={key.length * 2.8 / stageScale}
+                    offsetY={4.5 / stageScale}
+                  />
+                </Group>
+              );
+            })}
+          </Layer>
+        )}
 
         {/* Dimension lines */}
         <Layer>

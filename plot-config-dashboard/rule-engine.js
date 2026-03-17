@@ -83,9 +83,30 @@ window.RuleEngine = (function () {
             }
         }
 
-        // Corner Plot Rule
-        if (isCornerPlot) {
-            finalSetbacks.side1 = finalSetbacks.front;
+        // Road-Facing Side Rule: Any side that has a road must get at least the front setback.
+        // This handles both corner plots and any non-standard configuration where a road
+        // is on the side or rear direction. Automatically applies if there are multiple roads.
+        if (roads && roads.length > 0 && (isCornerPlot || roads.length > 1)) {
+            const { primaryRoadSideIndex, nSides: n = 4 } = options;
+            const primaryIdx = primaryRoadSideIndex !== undefined
+                ? primaryRoadSideIndex
+                : (roads[0]?.sideIndex ?? 0);
+            roads.forEach(road => {
+                const sIdx = road.sideIndex;
+                if (sIdx === undefined || sIdx === primaryIdx) return; // primary front already set
+                const offset = (sIdx - primaryIdx + n) % n;
+                if (offset === 1) {
+                    finalSetbacks.side1 = Math.max(finalSetbacks.side1, finalSetbacks.front);
+                } else if (offset === n - 1) {
+                    finalSetbacks.side2 = Math.max(finalSetbacks.side2, finalSetbacks.front);
+                } else if (offset === 2 && n >= 4) {
+                    // Road is on the rear — rear also gets at least front setback
+                    finalSetbacks.rear = Math.max(finalSetbacks.rear, finalSetbacks.front);
+                } else {
+                    // Fallback for unusual topologies
+                    finalSetbacks.side1 = Math.max(finalSetbacks.side1, finalSetbacks.front);
+                }
+            });
         }
 
         // 3. FAR Logic (Telescopic vs Flat)

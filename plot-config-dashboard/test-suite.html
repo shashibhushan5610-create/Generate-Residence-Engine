@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UP Bylaw Engine — Test Suite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg: #020617;
+            --panel: #0f172a;
+            --accent: #6366f1;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.08);
+            --success: #10b981;
+            --error: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        aside {
+            width: 380px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        header {
+            padding: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 1.1rem;
+            font-weight: 800;
+            margin: 0;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .test-list {
+            padding: 1rem;
+        }
+
+        .test-item {
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .test-item:hover {
+            border-color: var(--accent);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .test-item.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .test-item .id {
+            font-size: 0.65rem;
+            font-weight: 800;
+            opacity: 0.8;
+            margin-bottom: 0.25rem;
+            display: block;
+        }
+
+        .test-item .name {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        /* Main Content */
+        main {
+            flex: 1;
+            padding: 3rem;
+            overflow-y: auto;
+            background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.05), transparent);
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+        }
+
+        .outcome-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 100px;
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            margin-bottom: 1.5rem;
+        }
+
+        .outcome-pass {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .outcome-fail {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+        }
+
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            padding: 1.25rem;
+            border-radius: 12px;
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .rules-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 2rem;
+        }
+
+        .rules-table th {
+            text-align: left;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .rules-table td {
+            padding: 1rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            font-size: 0.85rem;
+        }
+
+        .status-pill {
+            font-size: 0.65rem;
+            font-weight: 800;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <aside>
+        <header>
+            <h1><span style="background: var(--accent); color:white; padding: 2px 8px; border-radius: 6px;">UP</span>
+                Bylaw Engine</h1>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin-top: 0.5rem;">Interactive Test Suite v1.0</p>
+        </header>
+        <div class="test-list" id="test-list">
+            <!-- Test items will be injected here -->
+        </div>
+    </aside>
+
+    <main id="main-content">
+        <!-- Result will be shown here -->
+        <div
+            style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-muted);">
+            <p>Select a test case to run the Bylaw Rule Engine</p>
+        </div>
+    </main>
+
+    <!-- Dependencies -->
+    <script src="rules-data.js"></script>
+    <script src="Rule_Engine_Implementation.js"></script>
+    <script>
+        const TEST_CASES = [
+            { id: 1, name: "Valid Single Unit", building_type: "single_unit", area: 150, height: 12, road: 9, desc: "Standard residential plot on 9m road. Should PASS." },
+            { id: 2, name: "Height Violation", building_type: "single_unit", area: 250, height: 18, road: 9, desc: "Height 18m exceeds 15m limit for single residential. Should FAIL." },
+            { id: 3, name: "Plot Size Too Small", building_type: "single_unit", area: 25, height: 10, road: 6, desc: "Area 25sqm is below the 30sqm minimum requirement. Should FAIL." },
+            { id: 4, name: "Valid Multi Unit", building_type: "multi_unit", area: 1200, height: 15, road: 15, desc: "Standard Group Housing on wide road. Should PASS." },
+            { id: 5, name: "Road Access Violation", building_type: "multi_unit", area: 1500, height: 17, road: 6, desc: "Group Housing requires min 9m road (provided 6m). Should FAIL." },
+            { id: 6, name: "FAR Over Limit", building_type: "single_unit", area: 100, height: 12, road: 9, totalFloorArea: 240, desc: "FAR 2.4 exceeds limit for small plots. Should FAIL." },
+            { id: 7, name: "Park Abutting (Valid)", building_type: "single_unit", area: 600, height: 14, road: 18, desc: "Large plot on major road. Should PASS." },
+            { id: 8, name: "Commercial Valid", building_type: "commercial", area: 200, height: 11, road: 12, desc: "Commercial shop on 12m road. Should PASS." },
+            { id: 9, name: "Multiple Violations", building_type: "commercial", area: 50, height: 20, road: 6, desc: "Exceeds height (12m) AND road width (9m) for commercial. Should FAIL." },
+            { id: 10, name: "Minimum Valid", building_type: "single_unit", area: 30, height: 9.5, road: 3.5, desc: "Minimum boundary case for small plotted development. Should PASS." }
+        ];
+
+        let engine = null;
+
+        function init() {
+            if (window.UP_BYLAW_RULES) {
+                engine = new UPBylawRuleEngine(window.UP_BYLAW_RULES);
+                renderTestList();
+            } else {
+                document.getElementById('main-content').innerHTML = `<p style="color:var(--error)">Error: UP_BYLAW_RULES global not found. Ensure rules-data.js is loaded.</p>`;
+            }
+        }
+
+        function renderTestList() {
+            const list = document.getElementById('test-list');
+            list.innerHTML = '';
+            TEST_CASES.forEach(t => {
+                const item = document.createElement('div');
+                item.className = 'test-item';
+                item.innerHTML = `
+                    <span class="id">TEST CASE #${t.id}</span>
+                    <span class="name">${t.name}</span>
+                `;
+                item.onclick = () => runTest(t);
+                list.appendChild(item);
+            });
+        }
+
+        function runTest(test) {
+            // Update active state
+            document.querySelectorAll('.test-item').forEach(el => el.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+
+            // Construct Proposal
+            const proposal = UPBylawRuleEngine.createProposal({
+                building_type: test.building_type,
+                plotArea: test.area,
+                proposedHeight: test.height,
+                totalFloorArea: test.totalFloorArea || (test.area * 1.5), // fallback
+                roads: [{ width: test.road, proposedWidth: test.road, sideIndex: 0 }]
+            });
+
+            const result = engine.validateBuilding(proposal);
+            renderResult(test, result);
+        }
+
+        function renderResult(test, result) {
+            const main = document.getElementById('main-content');
+            const outcomeClass = result.isValid ? 'outcome-pass' : 'outcome-fail';
+            const outcomeText = result.isValid ? '✓ COMPLIANT' : '✗ VIOLATION';
+
+            main.innerHTML = `
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div>
+                            <span class="outcome-badge ${outcomeClass}">${outcomeText}</span>
+                            <h2 style="margin:0; font-size:1.75rem; font-weight:800;">${test.name}</h2>
+                            <p style="color:var(--text-muted); margin-top:0.5rem; font-weight:500;">${test.desc}</p>
+                        </div>
+                    </div>
+
+                    <div class="report-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">PLOT AREA</div>
+                            <div class="stat-value">${test.area}m²</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">HEIGHT</div>
+                            <div class="stat-value">${test.height}m</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">ROAD WIDTH</div>
+                            <div class="stat-value">${test.road}m</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">RULES APPLIED</div>
+                            <div class="stat-value">${result.summary.totalRules}</div>
+                        </div>
+                    </div>
+
+                    <h3 style="margin-top:3rem; font-size:0.9rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-muted);">Engine Audit Log</h3>
+                    <table class="rules-table">
+                        <thead>
+                            <tr>
+                                <th>STATUS</th>
+                                <th>RULE NAME</th>
+                                <th>MESSAGE</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${result.report.map(r => `
+                                <tr>
+                                    <td><span class="status-pill" style="background:${r.status === 'pass' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'}; color:${r.status === 'pass' ? 'var(--success)' : 'var(--error)'}">${r.status.toUpperCase()}</span></td>
+                                    <td style="font-weight:600">${r.rule_name}</td>
+                                    <td style="color:var(--text-muted)">${r.message}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        init();
+    </script>
+</body>
+
+</html>
